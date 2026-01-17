@@ -1,0 +1,56 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+.installed.cfg
+*.egg
+*.egg-info/
+.tox/
+.nox/
+.coverage
+.cache
+.pytest_cache/
+.mypy_cache/
+
+# Virtual Environment
+.venv/
+venv/
+env/
+ENV/
+
+# Environment Variables
+.env
+.env.local
+
+# Database
+*.db
+*.sqlite3
+chroma_db/
+instance/
+
+# MacOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
+
+# UI (if managed from root mainly, though it has its own gitignore, root gitignore acts as global)
+ui/node_modules/
+ui/dist/
+ui/.env
