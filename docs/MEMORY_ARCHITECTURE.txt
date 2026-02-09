@@ -1,0 +1,169 @@
+"""
+SQL-Aware Memory Architecture
+==============================
+
+BEFORE (No Memory):
+-------------------
+User Query 1: "Show all users"
+    ↓
+    [Text2SQL Agent]
+    ↓
+    SQL: SELECT * FROM users
+    ↓
+    Results returned ✅
+    (Memory: NOTHING SAVED)
+
+User Query 2: "How many of them?"
+    ↓
+    [Text2SQL Agent] ← No context!
+    ↓
+    ❌ "What should I count?" (Fails)
+
+
+AFTER (With Memory):
+--------------------
+User Query 1: "Show all users"
+    ↓
+    [Text2SQL Agent]
+    ↓
+    SQL: SELECT * FROM users
+    ↓
+    Results: 150 users ✅
+    ↓
+    SAVE TO MEMORY: {
+        user_query: "Show all users",
+        generated_sql: "SELECT * FROM users",
+        result_summary: "150 rows with columns: id, name, email",
+        timestamp: 1234567890.0
+    }
+
+
+User Query 2: "How many of them?"
+    ↓
+    [Text2SQL Agent]
+    ↓
+    Load Memory → Build Context String
+    ↓
+    Conversation History:
+    "Query 1:
+      User asked: 'Show all users'
+      SQL executed: SELECT * FROM users
+      Result: 150 rows with columns: id, name, email"
+    ↓
+    Send to LLM: [Schema + History + New Query]
+    ↓
+    LLM understands: "them" = users from Query 1
+    ↓
+    SQL: SELECT COUNT(*) FROM users
+    ↓
+    Results: count=150 ✅
+    ↓
+    SAVE TO MEMORY: {
+        user_query: "How many of them?",
+        generated_sql: "SELECT COUNT(*) FROM users",
+        result_summary: "Query returned a single value: count=150",
+        timestamp: 1234567891.0
+    }
+
+
+MEMORY STRUCTURE:
+-----------------
+Text2SQLAgent
+    │
+    ├── query_history: list[QueryContext]
+    │   │
+    │   ├── [0] QueryContext {
+    │   │       user_query: "Show all users",
+    │   │       generated_sql: "SELECT * FROM users",
+    │   │       result_summary: "150 rows...",
+    │   │       timestamp: 1234567890.0
+    │   │   }
+    │   │
+    │   ├── [1] QueryContext {
+    │   │       user_query: "How many of them?",
+    │   │       generated_sql: "SELECT COUNT(*) FROM users",
+    │   │       result_summary: "count=150",
+    │   │       timestamp: 1234567891.0
+    │   │   }
+    │   │
+    │   └── ... (up to MAX_HISTORY=5 queries)
+    │
+    └── MAX_HISTORY: int = 5
+
+
+METHOD FLOW:
+------------
+agent.query("Show all users")
+    │
+    ├─→ generate_sql("Show all users")
+    │   │
+    │   ├─→ get_schema() → "TABLE users: id, name, email..."
+    │   │
+    │   ├─→ _build_context_string() → "No previous queries" (first time)
+    │   │
+    │   ├─→ LLM.invoke({
+    │   │       schema: "...",
+    │   │       history: "No previous queries",
+    │   │       query: "Show all users"
+    │   │   })
+    │   │
+    │   └─→ returns: "SELECT * FROM users"
+    │
+    ├─→ execute_sql("SELECT * FROM users")
+    │   └─→ returns: [{id: 1, name: "John"}, ...]
+    │
+    ├─→ _save_query_context(
+    │       "Show all users",
+    │       "SELECT * FROM users",
+    │       results
+    │   )
+    │   └─→ Appends QueryContext to query_history ✅
+    │
+    └─→ _format_results_professionally(...)
+        └─→ returns formatted answer
+
+
+agent.query("How many of them?")  ← SECOND QUERY
+    │
+    ├─→ generate_sql("How many of them?")
+    │   │
+    │   ├─→ get_schema() → "TABLE users: id, name, email..."
+    │   │
+    │   ├─→ _build_context_string() → 
+    │   │       "Query 1:
+    │   │         User asked: 'Show all users'
+    │   │         SQL executed: SELECT * FROM users
+    │   │         Result: 150 rows..." ← HAS MEMORY NOW! ✅
+    │   │
+    │   ├─→ LLM.invoke({
+    │   │       schema: "...",
+    │   │       history: "Query 1: ...",  ← Context included!
+    │   │       query: "How many of them?"
+    │   │   })
+    │   │   │
+    │   │   └─→ LLM sees "them" refers to "users" from history
+    │   │
+    │   └─→ returns: "SELECT COUNT(*) FROM users"
+    │
+    ├─→ execute_sql("SELECT COUNT(*) FROM users")
+    │   └─→ returns: [{count: 150}]
+    │
+    ├─→ _save_query_context(...)
+    │   └─→ Appends to query_history (now has 2 items) ✅
+    │
+    └─→ returns formatted answer
+
+
+SLIDING WINDOW:
+---------------
+MAX_HISTORY = 5
+
+Queries: 1, 2, 3, 4, 5
+Memory:  [1][2][3][4][5]  ← At capacity
+
+New Query: 6
+Memory:  [2][3][4][5][6]  ← Oldest (1) dropped
+
+New Query: 7
+Memory:  [3][4][5][6][7]  ← Oldest (2) dropped
+"""

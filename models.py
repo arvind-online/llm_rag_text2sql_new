@@ -2,6 +2,7 @@
 
 from enum import Enum
 from typing import Any, Optional
+from dataclasses import dataclass
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +12,15 @@ class RouteType(str, Enum):
     RAG = "rag"
     SQL = "sql"
     HYBRID = "hybrid"
+
+
+@dataclass
+class QueryContext:
+    """Context from a previous SQL query for conversation memory."""
+    user_query: str
+    generated_sql: str
+    result_summary: str  # Human-readable summary of results
+    timestamp: float
 
 
 class QueryRequest(BaseModel):

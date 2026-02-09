@@ -1,6 +1,7 @@
 """Text2SQL agent for natural language to SQL conversion."""
 
 import re
+import time
 from typing import Optional
 
 from sqlalchemy import create_engine, inspect, text
@@ -8,7 +9,7 @@ from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
 from config import settings
-from models import AgentResult
+from models import AgentResult, QueryContext
 import socket
 
 
@@ -16,6 +17,9 @@ TEXT2SQL_SYSTEM_PROMPT = """You are an expert SQL query generator. Your job is t
 
 Database Schema:
 {schema}
+
+Conversation History:
+{history}
 
 Rules:
 1. Generate ONLY valid PostgreSQL syntax
@@ -25,6 +29,9 @@ Rules:
 5. NEVER generate DELETE, UPDATE, INSERT, DROP, or any data-modifying queries
 6. Return ONLY the SQL query, no explanations
 7. Use double quotes for identifiers if they contain special characters or are case-sensitive
+8. **Use the conversation history to understand context for follow-up questions**
+9. If the user refers to previous results or uses pronouns like "it", "those", "that", "them", resolve them based on the conversation history
+10. For follow-up queries like "show more details" or "filter those", use the previous SQL context to build upon it
 
 If you cannot generate a valid query for the question, respond with: CANNOT_GENERATE
 """
@@ -69,6 +76,10 @@ class Text2SQLAgent:
                 
         # Initialize PostgreSQL database connection
         self.engine = create_engine(settings.database_url)
+        
+        # Initialize conversation memory
+        self.query_history: list[QueryContext] = []
+        self.MAX_HISTORY = 5  # Keep last 5 queries for context
         
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", TEXT2SQL_SYSTEM_PROMPT),
@@ -152,6 +163,61 @@ class Text2SQLAgent:
         
         return sql
     
+    def _build_context_string(self) -> str:
+        """
+        Build a formatted string of conversation history.
+        
+        Returns:
+            Formatted conversation history or indication of no history
+        """
+        if not self.query_history:
+            return "No previous queries in this session."
+        
+        context_parts = []
+        for i, ctx in enumerate(self.query_history[-self.MAX_HISTORY:], 1):
+            context_parts.append(
+                f"Query {i}:\n"
+                f"  User asked: \"{ctx.user_query}\"\n"
+                f"  SQL executed: {ctx.generated_sql}\n"
+                f"  Result: {ctx.result_summary}"
+            )
+        
+        return "\n\n".join(context_parts)
+    
+    def _save_query_context(self, user_query: str, sql: str, results: list[dict]) -> None:
+        """
+        Save query context to memory.
+        
+        Args:
+            user_query: Original user question
+            sql: Generated SQL query
+            results: Query results
+        """
+        # Generate a summary of results
+        if not results:
+            result_summary = "Query returned no results."
+        elif len(results) == 1 and len(results[0]) == 1:
+            # Single value result
+            key, value = list(results[0].items())[0]
+            result_summary = f"Query returned a single value: {key}={value}"
+        else:
+            # Multiple rows/columns
+            result_summary = f"Query returned {len(results)} row(s) with columns: {', '.join(results[0].keys()) if results else 'none'}"
+        
+        # Create context and add to history
+        context = QueryContext(
+            user_query=user_query,
+            generated_sql=sql,
+            result_summary=result_summary,
+            timestamp=time.time()
+        )
+        
+        self.query_history.append(context)
+        
+        # Keep only the last MAX_HISTORY items
+        if len(self.query_history) > self.MAX_HISTORY:
+            self.query_history = self.query_history[-self.MAX_HISTORY:]
+    
     def generate_sql(self, query: str) -> Optional[str]:
         """
         Generate SQL from natural language.
@@ -163,12 +229,14 @@ class Text2SQLAgent:
             SQL query string or None if generation failed
         """
         schema = self.get_schema()
+        history = self._build_context_string()
         
         chain = self.prompt | self.llm
         
         try:
             response = chain.invoke({
                 "schema": schema,
+                "history": history,
                 "query": query,
             })
             
@@ -262,6 +330,9 @@ class Text2SQLAgent:
         # Execute query
         try:
             results = self.execute_sql(sql)
+            
+            # Save query context to memory
+            self._save_query_context(query, sql, results)
             
             # Format results professionally
             content = self._format_results_professionally(query, results)
