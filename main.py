@@ -89,9 +89,11 @@ async def process_query(request: QueryRequest):
     - RAG (for document/knowledge queries)
     - Text2SQL (for data/database queries)
     - Hybrid (for queries needing both)
+    
+    Optionally accepts a session_id for multi-user support and conversation memory.
     """
     try:
-        result = run_query(request.query, request.context)
+        result = run_query(request.query, request.context, request.session_id)
         
         if result.get("final_response"):
             return result["final_response"]
@@ -219,6 +221,32 @@ async def get_config():
         "chroma_collection": settings.chroma_collection_name,
         "debug_mode": settings.show_sql_queries,
     }
+
+
+@app.get("/sessions/status")
+async def get_session_status():
+    """Get session manager status."""
+    from session_manager import get_session_manager
+    
+    session_mgr = get_session_manager()
+    return {
+        "active_sessions": session_mgr.get_active_session_count(),
+        "ttl_seconds": session_mgr.ttl,
+    }
+
+
+@app.delete("/sessions/{session_id}")
+async def delete_session(session_id: str):
+    """Delete a specific session."""
+    from session_manager import get_session_manager
+    
+    session_mgr = get_session_manager()
+    success = session_mgr.delete_session(session_id)
+    
+    if success:
+        return {"success": True, "message": f"Session {session_id} deleted"}
+    else:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
 
 
 # Mount static files (React UI) if build exists

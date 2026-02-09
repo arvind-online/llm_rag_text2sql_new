@@ -27,6 +27,7 @@ class QueryRequest(BaseModel):
     """User query request."""
     query: str = Field(..., description="The user's natural language query")
     context: Optional[str] = Field(None, description="Optional additional context")
+    session_id: Optional[str] = Field(None, description="Optional session ID for multi-user support")
 
 
 class QueryResponse(BaseModel):
@@ -62,6 +63,7 @@ class GraphState(BaseModel):
     """State passed through the LangGraph workflow."""
     query: str = Field(..., description="Original user query")
     context: Optional[str] = Field(None, description="Optional context")
+    session_id: Optional[str] = Field(None, description="Session ID for multi-user support")
     route_decision: Optional[RouteDecision] = Field(None, description="Router's decision")
     rag_result: Optional[AgentResult] = Field(None, description="RAG agent result")
     sql_result: Optional[AgentResult] = Field(None, description="Text2SQL agent result")

@@ -5,6 +5,7 @@ from typing import Literal, Optional
 from langgraph.graph import StateGraph, END
 
 from models import GraphState, RouteType
+from session_manager import get_session_manager, UserSession
 
 
 # Lazy-initialized agent instances
@@ -68,19 +69,29 @@ def execute_rag(state: GraphState) -> GraphState:
 
 def execute_sql(state: GraphState) -> GraphState:
     """SQL agent node: convert to SQL and query database."""
-    result = get_sql_agent().query(state.query)
+    # Get or create session
+    session_mgr = get_session_manager()
+    session = session_mgr.get_or_create_session(state.session_id)
+    
+    result = get_sql_agent().query(state.query, session)
     state_dict = state.model_dump()
     state_dict["sql_result"] = result
+    state_dict["session_id"] = session.session_id  # Update with actual session ID
     return GraphState(**state_dict)
 
 
 def execute_both(state: GraphState) -> GraphState:
     """Execute both RAG and SQL agents for hybrid queries."""
+    # Get or create session for SQL agent
+    session_mgr = get_session_manager()
+    session = session_mgr.get_or_create_session(state.session_id)
+    
     rag_result = get_rag_agent().query(state.query)
-    sql_result = get_sql_agent().query(state.query)
+    sql_result = get_sql_agent().query(state.query, session)
     state_dict = state.model_dump()
     state_dict["rag_result"] = rag_result
     state_dict["sql_result"] = sql_result
+    state_dict["session_id"] = session.session_id  # Update with actual session ID
     return GraphState(**state_dict)
 
 
@@ -175,18 +186,19 @@ def get_graph():
     return _graph
 
 
-def run_query(query: str, context: Optional[str] = None) -> GraphState:
+def run_query(query: str, context: Optional[str] = None, session_id: Optional[str] = None) -> GraphState:
     """
     Run a query through the LangGraph workflow.
     
     Args:
         query: User's natural language query
         context: Optional additional context
+        session_id: Optional session ID for multi-user support
         
     Returns:
         Final GraphState with results
     """
-    initial_state = GraphState(query=query, context=context)
+    initial_state = GraphState(query=query, context=context, session_id=session_id)
     
     # Run the graph
     result = get_graph().invoke(initial_state)

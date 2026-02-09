@@ -10,6 +10,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from config import settings
 from models import AgentResult, QueryContext
+from session_manager import UserSession
 import socket
 
 
@@ -76,10 +77,6 @@ class Text2SQLAgent:
                 
         # Initialize PostgreSQL database connection
         self.engine = create_engine(settings.database_url)
-        
-        # Initialize conversation memory
-        self.query_history: list[QueryContext] = []
-        self.MAX_HISTORY = 5  # Keep last 5 queries for context
         
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", TEXT2SQL_SYSTEM_PROMPT),
@@ -163,18 +160,22 @@ class Text2SQLAgent:
         
         return sql
     
-    def _build_context_string(self) -> str:
+    def _build_context_string(self, query_history: list[QueryContext]) -> str:
         """
         Build a formatted string of conversation history.
+        
+        Args:
+            query_history: List of QueryContext objects
         
         Returns:
             Formatted conversation history or indication of no history
         """
-        if not self.query_history:
+        if not query_history:
             return "No previous queries in this session."
         
         context_parts = []
-        for i, ctx in enumerate(self.query_history[-self.MAX_HISTORY:], 1):
+        max_history = 5  # Show last 5 queries
+        for i, ctx in enumerate(query_history[-max_history:], 1):
             context_parts.append(
                 f"Query {i}:\n"
                 f"  User asked: \"{ctx.user_query}\"\n"
@@ -184,7 +185,7 @@ class Text2SQLAgent:
         
         return "\n\n".join(context_parts)
     
-    def _save_query_context(self, user_query: str, sql: str, results: list[dict]) -> None:
+    def _save_query_context(self, session: UserSession, user_query: str, sql: str, results: list[dict]) -> None:
         """
         Save query context to memory.
         
@@ -212,13 +213,13 @@ class Text2SQLAgent:
             timestamp=time.time()
         )
         
-        self.query_history.append(context)
+        session.query_history.append(context)
         
-        # Keep only the last MAX_HISTORY items
-        if len(self.query_history) > self.MAX_HISTORY:
-            self.query_history = self.query_history[-self.MAX_HISTORY:]
+        # Keep only the last max_history items
+        if len(session.query_history) > session.max_history:
+            session.query_history = session.query_history[-session.max_history:]
     
-    def generate_sql(self, query: str) -> Optional[str]:
+    def generate_sql(self, query: str, session: UserSession) -> Optional[str]:
         """
         Generate SQL from natural language.
         
@@ -228,8 +229,12 @@ class Text2SQLAgent:
         Returns:
             SQL query string or None if generation failed
         """
-        schema = self.get_schema()
-        history = self._build_context_string()
+        # Use cached schema from session, or fetch and cache it
+        if not session.cached_schema:
+            session.cached_schema = self.get_schema()
+        
+        schema = session.cached_schema
+        history = self._build_context_string(session.query_history)
         
         chain = self.prompt | self.llm
         
@@ -297,7 +302,7 @@ class Text2SQLAgent:
             else:
                 return f"Found {len(results)} result(s) matching your query."
     
-    def query(self, query: str) -> AgentResult:
+    def query(self, query: str, session: UserSession) -> AgentResult:
         """
         Convert natural language to SQL, execute, and return results.
         
@@ -307,8 +312,8 @@ class Text2SQLAgent:
         Returns:
             AgentResult with the query results
         """
-        # Generate SQL
-        sql = self.generate_sql(query)
+        # Generate SQL (uses cached schema from session)
+        sql = self.generate_sql(query, session)
         
         if not sql:
             return AgentResult(
@@ -331,8 +336,8 @@ class Text2SQLAgent:
         try:
             results = self.execute_sql(sql)
             
-            # Save query context to memory
-            self._save_query_context(query, sql, results)
+            # Save query context to session memory
+            self._save_query_context(session, query, sql, results)
             
             # Format results professionally
             content = self._format_results_professionally(query, results)
