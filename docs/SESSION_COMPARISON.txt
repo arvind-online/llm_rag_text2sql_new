@@ -1,0 +1,181 @@
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    BEFORE vs AFTER: Session Management                  │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+                              BEFORE
+═══════════════════════════════════════════════════════════════════════════
+
+User 1: "Show users"
+    ↓
+    Text2SQLAgent (single instance)
+    │
+    ├─ get_schema() → DB introspection (100ms) ❌
+    ├─ query_history: [...]  ← SHARED GLOBALLY! ❌
+    └─ Returns result
+
+User 2: "Show orders" (same agent instance!)
+    ↓
+    Text2SQLAgent (same instance)
+    │
+    ├─ get_schema() → DB introspection (100ms) ❌
+    ├─ query_history: [User1 queries, User2 queries] ← MIXED! ❌
+    └─ Returns result
+
+User 1: "Count them" (BROKEN - sees User2's history!) ❌
+    ↓
+    Context pollution! Agent confused about what "them" refers to
+
+
+═══════════════════════════════════════════════════════════════════════════
+                              AFTER
+═══════════════════════════════════════════════════════════════════════════
+
+User 1: "Show users" [session_id="user-1"]
+    ↓
+    SessionManager.get_or_create_session("user-1")
+    ↓
+    UserSession {
+        session_id: "user-1",
+        cached_schema: None,
+        query_history: []
+    }
+    ↓
+    Text2SQLAgent.query(query, session)
+    │
+    ├─ session.cached_schema is None
+    ├─ get_schema() → DB introspection (100ms) ✅ First time only
+    ├─ session.cached_schema = schema ✅ Cached!
+    ├─ session.query_history.append(...) ✅ User 1 only
+    └─ Returns result
+
+
+User 2: "Show orders" [session_id="user-2"]
+    ↓
+    SessionManager.get_or_create_session("user-2")
+    ↓
+    UserSession {                          ← DIFFERENT SESSION! ✅
+        session_id: "user-2",
+        cached_schema: None,
+        query_history: []
+    }
+    ↓
+    Text2SQLAgent.query(query, session)
+    │
+    ├─ session.cached_schema is None
+    ├─ get_schema() → DB introspection (100ms) ✅
+    ├─ session.cached_schema = schema ✅ Cached!
+    ├─ session.query_history.append(...) ✅ User 2 only
+    └─ Returns result
+
+
+User 1: "Count them" [session_id="user-1"]
+    ↓
+    SessionManager.get_session("user-1")
+    ↓
+    UserSession {
+        session_id: "user-1",
+        cached_schema: "TABLE users..." ✅ CACHED!
+        query_history: [
+            {user_query: "Show users", sql: "SELECT * FROM users", ...}
+        ]
+    }
+    ↓
+    Text2SQLAgent.query(query, session)
+    │
+    ├─ session.cached_schema EXISTS ⚡ Skip DB introspection!
+    ├─ Build history from session.query_history ✅ User 1's history only
+    ├─ LLM sees: "User asked about 'users' → 'them' = users" ✅
+    └─ Returns: COUNT(*) FROM users ✅ CORRECT!
+
+
+═══════════════════════════════════════════════════════════════════════════
+                         KEY IMPROVEMENTS
+═══════════════════════════════════════════════════════════════════════════
+
+┌──────────────────────────┬──────────────┬─────────────────────────┐
+│ Aspect                   │ Before       │ After                   │
+├──────────────────────────┼──────────────┼─────────────────────────┤
+│ Multi-user support       │ ❌ Broken    │ ✅ Isolated sessions    │
+│ Schema caching           │ ❌ Never     │ ✅ Per session          │
+│ Memory leakage           │ ❌ Grows ∞   │ ✅ Auto-expires (30min) │
+│ Context pollution        │ ❌ Yes       │ ✅ No                   │
+│ Thread safety            │ ❌ No        │ ✅ Yes (locks)          │
+│ DB introspection/session │ Every query  │ Once per session        │
+└──────────────────────────┴──────────────┴─────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════
+                    SCHEMA CACHING FLOW (SINGLE USER)
+═══════════════════════════════════════════════════════════════════════════
+
+Query 1: "Show users"
+    ├─ session.cached_schema = None
+    ├─ Fetch from DB (100ms) ❌ One-time cost
+    ├─ Cache it: session.cached_schema = "TABLE users..." ✅
+    └─ Send to LLM with schema
+
+Query 2: "Count users"
+    ├─ session.cached_schema EXISTS! ⚡
+    ├─ Skip DB (0ms) ✅ Performance win!
+    └─ Send to LLM with cached schema
+
+Query 3: "Filter by active"
+    ├─ session.cached_schema EXISTS! ⚡
+    ├─ Skip DB (0ms) ✅
+    └─ Send to LLM with cached schema
+
+Query 4: "Sort by date"
+    ├─ session.cached_schema EXISTS! ⚡
+    ├─ Skip DB (0ms) ✅
+    └─ Send to LLM with cached schema
+
+...30 minutes of inactivity...
+
+Session expired → schema cache cleared → Memory freed ✅
+
+
+═══════════════════════════════════════════════════════════════════════════
+                         SESSION LIFECYCLE
+═══════════════════════════════════════════════════════════════════════════
+
+1. User makes first request
+   ├─ SessionManager creates new UserSession
+   ├─ Generates UUID if no session_id provided
+   └─ session.created_at = now
+
+2. User makes follow-up requests
+   ├─ SessionManager returns existing session
+   ├─ session.last_accessed = now (updated)
+   └─ Schema reused from cache ⚡
+
+3. User inactive for 30 minutes
+   ├─ SessionManager._cleanup_expired() runs
+   ├─ Session deleted from memory
+   └─ Resources freed ✅
+
+4. User returns after expiry
+   ├─ Old session_id not found
+   ├─ New session created
+   └─ Fresh start (schema re-fetched)
+
+
+═══════════════════════════════════════════════════════════════════════════
+                       THREAD SAFETY EXAMPLE
+═══════════════════════════════════════════════════════════════════════════
+
+Time  │ Thread 1 (User A)              │ Thread 2 (User B)
+──────┼────────────────────────────────┼────────────────────────────────
+T1    │ Request session "A"            │
+      │ ├─ Lock acquired 🔒            │
+      │ └─ Session created             │
+T2    │ Lock released 🔓               │ Request session "B"
+      │                                │ ├─ Lock acquired 🔒
+T3    │                                │ └─ Session created
+      │                                │ Lock released 🔓
+T4    │ Query with session A ✅        │ Query with session B ✅
+      │ (No interference!)             │ (Isolated!)
+
+
+═══════════════════════════════════════════════════════════════════════════
