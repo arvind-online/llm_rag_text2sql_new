@@ -1,0 +1,9 @@
+.git
+.venv
+.env
+.DS_Store
+__pycache__
+*.pyc
+ui/node_modules
+ui/dist
+tmp

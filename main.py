@@ -221,6 +221,20 @@ async def get_config():
     }
 
 
+# Mount static files (React UI) if build exists
+# This must be placed after API routes to avoid conflict
+ui_dist_path = Path("ui/dist")
+if ui_dist_path.exists():
+    print(f"INFO: Mounting UI from {ui_dist_path.absolute()}")
+    try:
+        from fastapi.staticfiles import StaticFiles
+        app.mount("/", StaticFiles(directory=str(ui_dist_path), html=True), name="ui")
+    except ImportError:
+        print("ERROR: 'aiofiles' is not installed. Static file serving will fail.")
+else:
+    print(f"WARNING: UI build directory not found at {ui_dist_path.absolute()}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(

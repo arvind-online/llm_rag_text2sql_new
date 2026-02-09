@@ -44,7 +44,7 @@ class Settings(BaseSettings):
         """Get PostgreSQL connection URL with URL-encoded password."""
         from urllib.parse import quote_plus
         encoded_password = quote_plus(self.pgpassword)
-        return f"postgresql://{self.pguser}:{encoded_password}@{self.pghost}:{self.pgport}/{self.pgdatabase}"
+        return f"postgresql://postgres.symkcqsvcrtgqmqcsfuq:{encoded_password}@aws-1-ap-northeast-1.pooler.supabase.com:{self.pgport}/{self.pgdatabase}"
     
     @property
     def chroma_persist_dir_resolved(self) -> Path:

@@ -9,6 +9,7 @@ from langchain_core.prompts import ChatPromptTemplate
 
 from config import settings
 from models import AgentResult
+import socket
 
 
 TEXT2SQL_SYSTEM_PROMPT = """You are an expert SQL query generator. Your job is to convert natural language questions into valid PostgreSQL queries.
@@ -57,7 +58,15 @@ class Text2SQLAgent:
             api_key=settings.groq_api_key,
             temperature=settings.llm_temperature,
         )
-        
+
+        # Force IPv4 resolution
+        old_getaddrinfo = socket.getaddrinfo
+
+        def ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+            return old_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+
+        socket.getaddrinfo = ipv4_only_getaddrinfo
+                
         # Initialize PostgreSQL database connection
         self.engine = create_engine(settings.database_url)
         

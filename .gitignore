@@ -43,6 +43,11 @@ ENV/
 chroma_db/
 instance/
 
+# Data Artifacts
+data/docs/
+data/chroma.zip
+data/chroma/
+
 # MacOS
 .DS_Store
 
