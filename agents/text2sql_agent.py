@@ -1,4 +1,8 @@
-"""Text2SQL agent for natural language to SQL conversion."""
+"""Text2SQL agent for natural language to SQL conversion.
+
+Supports both PostgreSQL and ClickHouse databases via the DB_TYPE
+setting in config.py / .env.
+"""
 
 import re
 from typing import Optional
@@ -12,12 +16,9 @@ from models import AgentResult
 import socket
 
 
-TEXT2SQL_SYSTEM_PROMPT = """You are an expert SQL query generator. Your job is to convert natural language questions into valid PostgreSQL queries.
+# ── Dialect-specific prompt templates ────────────────────────────────────
 
-Database Schema:
-{schema}
-
-Rules:
+POSTGRES_SQL_RULES = """Rules:
 1. Generate ONLY valid PostgreSQL syntax
 2. Use only the tables and columns shown in the schema
 3. Always use proper JOINs when accessing multiple tables
@@ -25,6 +26,28 @@ Rules:
 5. NEVER generate DELETE, UPDATE, INSERT, DROP, or any data-modifying queries
 6. Return ONLY the SQL query, no explanations
 7. Use double quotes for identifiers if they contain special characters or are case-sensitive
+8. You can use ILIKE for case-insensitive matching
+9. Use standard PostgreSQL date functions (NOW(), CURRENT_DATE, INTERVAL, etc.)"""
+
+CLICKHOUSE_SQL_RULES = """Rules:
+1. Generate ONLY valid ClickHouse SQL syntax
+2. Use only the tables and columns shown in the schema
+3. Always use proper JOINs when accessing multiple tables
+4. Use aggregation functions (COUNT, SUM, AVG, etc.) when appropriate
+5. NEVER generate DELETE, UPDATE, INSERT, DROP, ALTER, or any data-modifying queries
+6. Return ONLY the SQL query, no explanations
+7. Use backticks for identifiers if they contain special characters or are case-sensitive
+8. Use ClickHouse date functions: toDate(), toDateTime(), today(), now(), etc.
+9. Use ClickHouse string functions: like (case-sensitive) or ilike (case-insensitive)
+10. Arrays can be accessed with array[index] syntax
+11. Use FORMAT clause only if needed; by default omit it"""
+
+TEXT2SQL_SYSTEM_PROMPT = """You are an expert SQL query generator. Your job is to convert natural language questions into valid {db_dialect} queries.
+
+Database Schema:
+{schema}
+
+{sql_rules}
 
 If you cannot generate a valid query for the question, respond with: CANNOT_GENERATE
 """
@@ -49,7 +72,11 @@ Do not mention SQL, databases, or technical details."""
 
 
 class Text2SQLAgent:
-    """Agent that converts natural language to SQL and executes queries."""
+    """Agent that converts natural language to SQL and executes queries.
+    
+    Supports PostgreSQL and ClickHouse databases based on the DB_TYPE
+    configuration setting.
+    """
     
     def __init__(self):
         """Initialize the Text2SQL agent."""
@@ -66,9 +93,13 @@ class Text2SQLAgent:
             return old_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
 
         socket.getaddrinfo = ipv4_only_getaddrinfo
+        
+        # Store the active dialect
+        self.db_dialect = settings.db_dialect      # "PostgreSQL" or "ClickHouse"
+        self.db_type = settings.db_type.lower()    # "postgres" or "clickhouse"
                 
-        # Initialize PostgreSQL database connection
-        self.engine = create_engine(settings.database_url)
+        # Initialize database connection using the active URL
+        self.engine = create_engine(settings.active_database_url)
         
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", TEXT2SQL_SYSTEM_PROMPT),
@@ -79,9 +110,17 @@ class Text2SQLAgent:
             ("human", RESULT_FORMATTER_PROMPT),
         ])
     
+    def _get_sql_rules(self) -> str:
+        """Get dialect-specific SQL rules for the LLM prompt."""
+        if self.db_type == "clickhouse":
+            return CLICKHOUSE_SQL_RULES
+        return POSTGRES_SQL_RULES
+    
     def get_schema(self) -> str:
         """
         Get the database schema as a string.
+        
+        Works with both PostgreSQL and ClickHouse via SQLAlchemy inspect().
         
         Returns:
             Schema description
@@ -97,9 +136,14 @@ class Text2SQLAgent:
                 nullable = "NULL" if col.get('nullable', True) else "NOT NULL"
                 column_defs.append(f"    {col['name']} {col_type} {nullable}")
             
-            pk_columns = inspector.get_pk_constraint(table_name).get('constrained_columns', [])
-            if pk_columns:
-                column_defs.append(f"    PRIMARY KEY ({', '.join(pk_columns)})")
+            # Primary key introspection — ClickHouse doesn't always support this
+            if self.db_type != "clickhouse":
+                try:
+                    pk_columns = inspector.get_pk_constraint(table_name).get('constrained_columns', [])
+                    if pk_columns:
+                        column_defs.append(f"    PRIMARY KEY ({', '.join(pk_columns)})")
+                except Exception:
+                    pass  # Skip PK introspection if not supported
             
             schema_parts.append(f"TABLE {table_name}:\n" + "\n".join(column_defs))
         
@@ -156,6 +200,8 @@ class Text2SQLAgent:
         """
         Generate SQL from natural language.
         
+        The generated SQL dialect matches the configured DB_TYPE.
+        
         Args:
             query: Natural language query
             
@@ -163,6 +209,7 @@ class Text2SQLAgent:
             SQL query string or None if generation failed
         """
         schema = self.get_schema()
+        sql_rules = self._get_sql_rules()
         
         chain = self.prompt | self.llm
         
@@ -170,6 +217,8 @@ class Text2SQLAgent:
             response = chain.invoke({
                 "schema": schema,
                 "query": query,
+                "db_dialect": self.db_dialect,
+                "sql_rules": sql_rules,
             })
             
             sql = self._clean_sql(response.content)
@@ -269,6 +318,7 @@ class Text2SQLAgent:
             # Prepare metadata
             metadata = {
                 "row_count": len(results),
+                "db_type": self.db_type,
                 "results": results[:100]  # Include up to 100 results in metadata
             }
             
@@ -279,7 +329,7 @@ class Text2SQLAgent:
             return AgentResult(
                 agent_type="sql",
                 content=content,
-                sources=["Database"],
+                sources=[f"Database ({self.db_dialect})"],
                 metadata=metadata
             )
         except Exception as e:

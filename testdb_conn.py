@@ -25,6 +25,7 @@ def main():
         sys.exit(1)
 
     print("Agent initialized successfully.")
+    print(f"Database type: {agent.db_dialect} (DB_TYPE={agent.db_type})")
     
     print("\n--- Checking database connection and schema ---")
     try:
