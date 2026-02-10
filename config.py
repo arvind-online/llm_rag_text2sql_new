@@ -13,10 +13,17 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
-    # LLM Configuration (GROQ)
+    # LLM Provider: "groq" or "ollama"
+    llm_provider: str = "groq"
+    
+    # Groq Configuration
     groq_api_key: str = ""
     llm_model: str = "llama-3.3-70b-versatile"
     llm_temperature: float = 0.0
+    
+    # Ollama Configuration
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3"
     
     # PostgreSQL Database Configuration
     pghost: str = "localhost"
@@ -54,3 +61,28 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+
+def get_llm():
+    """
+    Factory function that returns the correct LangChain chat model
+    based on the LLM_PROVIDER setting.
+    
+    Returns:
+        ChatGroq or ChatOllama instance
+    """
+    if settings.llm_provider.lower() == "ollama":
+        from langchain_ollama import ChatOllama
+        return ChatOllama(
+            model=settings.ollama_model,
+            base_url=settings.ollama_base_url,
+            temperature=settings.llm_temperature,
+        )
+    else:
+        from langchain_groq import ChatGroq
+        return ChatGroq(
+            model=settings.llm_model,
+            api_key=settings.groq_api_key,
+            temperature=settings.llm_temperature,
+        )
+

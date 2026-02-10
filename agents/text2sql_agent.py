@@ -4,10 +4,9 @@ import re
 from typing import Optional
 
 from sqlalchemy import create_engine, inspect, text
-from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
-from config import settings
+from config import settings, get_llm
 from models import AgentResult
 import socket
 
@@ -53,11 +52,7 @@ class Text2SQLAgent:
     
     def __init__(self):
         """Initialize the Text2SQL agent."""
-        self.llm = ChatGroq(
-            model=settings.llm_model,
-            api_key=settings.groq_api_key,
-            temperature=settings.llm_temperature,
-        )
+        self.llm = get_llm()
 
         # Force IPv4 resolution
         old_getaddrinfo = socket.getaddrinfo
