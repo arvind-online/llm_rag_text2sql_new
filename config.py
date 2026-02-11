@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     bedrock_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
     aws_region: str = "ap-south-1"
     aws_profile: str = ""
-    aws_session_token: str = ""  # For temporary credentials
+    aws_bearer_token_bedrock: str = ""  # Short-term API key (bearer token)
     
     # PostgreSQL Database Configuration
     pghost: str = "localhost"
@@ -93,7 +93,11 @@ def get_llm():
         )
     elif provider == "bedrock":
         from langchain_aws import ChatBedrockConverse
-        import boto3
+        import os
+        
+        # Set bearer token env var if configured (auto-detected by langchain-aws)
+        if settings.aws_bearer_token_bedrock:
+            os.environ["AWS_BEARER_TOKEN_BEDROCK"] = settings.aws_bearer_token_bedrock
         
         # Build kwargs for Bedrock
         kwargs = {
@@ -102,18 +106,8 @@ def get_llm():
             "temperature": settings.llm_temperature,
         }
         
-        # If session token is provided, create custom boto3 client with temporary credentials
-        if settings.aws_session_token:
-            import os
-            session = boto3.Session(
-                aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
-                aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
-                aws_session_token=settings.aws_session_token,
-                region_name=settings.aws_region,
-            )
-            kwargs["client"] = session.client("bedrock-runtime")
-        # Use named profile if provided
-        elif settings.aws_profile:
+        # Use named profile if provided (fallback for non-API-key auth)
+        if settings.aws_profile and not settings.aws_bearer_token_bedrock:
             kwargs["credentials_profile_name"] = settings.aws_profile
         
         return ChatBedrockConverse(**kwargs)
