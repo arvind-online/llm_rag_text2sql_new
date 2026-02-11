@@ -2,10 +2,9 @@
 
 from typing import Optional
 
-from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 
-from config import settings
+from config import settings, get_llm
 from models import AgentResult, QueryResponse, RouteType
 
 
@@ -39,11 +38,7 @@ class ResultCombiner:
     
     def __init__(self):
         """Initialize the result combiner."""
-        self.llm = ChatGroq(
-            model=settings.llm_model,
-            api_key=settings.groq_api_key,
-            temperature=settings.llm_temperature,
-        )
+        self.llm = get_llm()
         
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", COMBINER_SYSTEM_PROMPT),

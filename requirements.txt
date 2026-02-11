@@ -146,3 +146,6 @@ yarl==1.22.0
 zipp==3.23.0
 zstandard==0.25.0
 aiofiles==23.2.1
+langchain-ollama==0.3.3
+langchain-aws==0.2.12
+

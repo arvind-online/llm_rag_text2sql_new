@@ -2,11 +2,10 @@
 
 from typing import Optional
 
-from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 
-from config import settings
+from config import settings, get_llm
 from models import RouteDecision, RouteType
 
 
@@ -39,11 +38,7 @@ class RouterAgent:
     
     def __init__(self):
         """Initialize the router agent."""
-        self.llm = ChatGroq(
-            model=settings.llm_model,
-            api_key=settings.groq_api_key,
-            temperature=settings.llm_temperature,
-        )
+        self.llm = get_llm()
         self.parser = PydanticOutputParser(pydantic_object=RouteDecision)
         
         self.prompt = ChatPromptTemplate.from_messages([

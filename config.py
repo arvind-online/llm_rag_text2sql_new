@@ -13,10 +13,23 @@ class Settings(BaseSettings):
         extra="ignore"
     )
     
-    # LLM Configuration (GROQ)
+    # LLM Provider: "groq", "ollama", or "bedrock"
+    llm_provider: str = "groq"
+    
+    # Groq Configuration
     groq_api_key: str = ""
     llm_model: str = "llama-3.3-70b-versatile"
     llm_temperature: float = 0.0
+    
+    # Ollama Configuration
+    ollama_base_url: str = "http://localhost:11434"
+    ollama_model: str = "llama3"
+    
+    # AWS Bedrock Configuration
+    bedrock_model_id: str = "anthropic.claude-3-haiku-20240307-v1:0"
+    aws_region: str = "ap-south-1"
+    aws_profile: str = ""
+    aws_session_token: str = ""  # For temporary credentials
     
     # PostgreSQL Database Configuration
     pghost: str = "localhost"
@@ -54,3 +67,62 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+
+def get_llm():
+    """
+    Factory function that returns the correct LangChain chat model
+    based on the LLM_PROVIDER setting.
+    
+    Supports:
+    - "groq": ChatGroq (cloud-based, fast)
+    - "ollama": ChatOllama (local or remote)
+    - "bedrock": ChatBedrockConverse (AWS Bedrock)
+    
+    Returns:
+        ChatGroq, ChatOllama, or ChatBedrockConverse instance
+    """
+    provider = settings.llm_provider.lower()
+    
+    if provider == "ollama":
+        from langchain_ollama import ChatOllama
+        return ChatOllama(
+            model=settings.ollama_model,
+            base_url=settings.ollama_base_url,
+            temperature=settings.llm_temperature,
+        )
+    elif provider == "bedrock":
+        from langchain_aws import ChatBedrockConverse
+        import boto3
+        
+        # Build kwargs for Bedrock
+        kwargs = {
+            "model": settings.bedrock_model_id,
+            "region_name": settings.aws_region,
+            "temperature": settings.llm_temperature,
+        }
+        
+        # If session token is provided, create custom boto3 client with temporary credentials
+        if settings.aws_session_token:
+            import os
+            session = boto3.Session(
+                aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+                aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+                aws_session_token=settings.aws_session_token,
+                region_name=settings.aws_region,
+            )
+            kwargs["client"] = session.client("bedrock-runtime")
+        # Use named profile if provided
+        elif settings.aws_profile:
+            kwargs["credentials_profile_name"] = settings.aws_profile
+        
+        return ChatBedrockConverse(**kwargs)
+    else:
+        # Default to Groq
+        from langchain_groq import ChatGroq
+        return ChatGroq(
+            model=settings.llm_model,
+            api_key=settings.groq_api_key,
+            temperature=settings.llm_temperature,
+        )
+

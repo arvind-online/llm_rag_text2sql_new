@@ -5,11 +5,10 @@ from typing import Optional
 
 import chromadb
 from chromadb.config import Settings as ChromaSettings
-from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from sentence_transformers import SentenceTransformer
 
-from config import settings
+from config import settings, get_llm
 from models import AgentResult
 
 
@@ -36,11 +35,7 @@ class RAGAgent:
     
     def __init__(self):
         """Initialize the RAG agent."""
-        self.llm = ChatGroq(
-            model=settings.llm_model,
-            api_key=settings.groq_api_key,
-            temperature=settings.llm_temperature,
-        )
+        self.llm = get_llm()
         
         # Initialize embedding model
         self.embedder = SentenceTransformer(settings.embedding_model)
