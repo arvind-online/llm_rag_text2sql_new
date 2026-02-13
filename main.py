@@ -23,7 +23,8 @@ async def lifespan(app: FastAPI):
     # Cleanup on shutdown (if needed)
 
 
-app = FastAPI(
+# Create the API app with all routes (no prefix needed)
+api_app = FastAPI(
     title="LangGraph Router API",
     description="An intelligent query router using LangGraph that directs queries to RAG, Text2SQL, or hybrid processing.",
     version="1.0.0",
@@ -31,7 +32,7 @@ app = FastAPI(
 )
 
 # Configure CORS for UI integration
-app.add_middleware(
+api_app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # Configure appropriately for production
     allow_credentials=True,
@@ -74,13 +75,13 @@ def extract_text_from_docx(file_path: Path) -> str:
     return "\n\n".join(text_parts)
 
 
-@app.get("/health", response_model=HealthResponse)
+@api_app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
     return HealthResponse(status="healthy", version="1.0.0")
 
 
-@app.post("/query", response_model=QueryResponse)
+@api_app.post("/query", response_model=QueryResponse)
 async def process_query(request: QueryRequest):
     """
     Process a user query through the LangGraph router.
@@ -103,7 +104,7 @@ async def process_query(request: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/documents", response_model=DocumentResponse)
+@api_app.post("/documents", response_model=DocumentResponse)
 async def add_document(document: DocumentInput):
     """
     Add a text document to the RAG knowledge base.
@@ -126,7 +127,7 @@ async def add_document(document: DocumentInput):
         )
 
 
-@app.post("/upload", response_model=DocumentResponse)
+@api_app.post("/upload", response_model=DocumentResponse)
 async def upload_document(
     file: UploadFile = File(...),
     source: Optional[str] = None,
@@ -210,7 +211,7 @@ async def upload_document(
         )
 
 
-@app.get("/config")
+@api_app.get("/config")
 async def get_config():
     """Get current configuration (non-sensitive values only)."""
     return {
@@ -228,17 +229,28 @@ if ui_dist_path.exists():
     print(f"INFO: Mounting UI from {ui_dist_path.absolute()}")
     try:
         from fastapi.staticfiles import StaticFiles
-        app.mount("/", StaticFiles(directory=str(ui_dist_path), html=True), name="ui")
+        api_app.mount("/", StaticFiles(directory=str(ui_dist_path), html=True), name="ui")
     except ImportError:
         print("ERROR: 'aiofiles' is not installed. Static file serving will fail.")
 else:
     print(f"WARNING: UI build directory not found at {ui_dist_path.absolute()}")
 
+# Create root app and mount api_app under the configured base path
+root_app = FastAPI()
+base_path = settings.base_url_path.rstrip('/') or '/'
+if base_path == '/':
+    # If base path is root, just use api_app directly
+    root_app = api_app
+else:
+    # Mount api_app under the base path
+    root_app.mount(base_path, api_app)
+    print(f"INFO: API mounted at {base_path}")
+
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
-        "main:app",
+        "main:root_app",
         host=settings.api_host,
         port=settings.api_port,
         reload=True

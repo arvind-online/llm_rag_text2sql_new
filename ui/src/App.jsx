@@ -25,7 +25,7 @@ function App() {
     setIsLoading(true)
 
     try {
-      const response = await fetch('http://localhost:8000/query', {
+      const response = await fetch('query', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

@@ -62,6 +62,7 @@ class Settings(BaseSettings):
     # API Settings
     api_host: str = "0.0.0.0"
     api_port: int = 8000
+    base_url_path: str = "/"  # Base URL path for deployment (e.g., "/nemo-ai-chatbot/")
     
     # Debug Settings
     show_sql_queries: bool = True  # Set to True to show SQL queries in responses
