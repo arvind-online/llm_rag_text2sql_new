@@ -25,7 +25,8 @@ function App() {
     setIsLoading(true)
 
     try {
-      const response = await fetch('query', {
+      const apiBase = import.meta.env.BASE_URL || '/';
+      const response = await fetch(`${apiBase}query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

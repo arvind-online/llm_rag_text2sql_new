@@ -5,9 +5,22 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ mode }) => {
   // Load BASE_URL_PATH from parent .env file (same one backend uses)
   const env = loadEnv(mode, '../', 'BASE_URL')
+  const basePath = env.BASE_URL_PATH || '/'
+  // Ensure basePath ends with / for proper URL construction
+  const baseWithSlash = basePath.endsWith('/') ? basePath : basePath + '/'
 
   return {
-    base: env.BASE_URL_PATH || '/',
+    base: baseWithSlash,
     plugins: [react()],
+    server: {
+      proxy: {
+        // Proxy API calls to the backend in dev mode
+        [`${baseWithSlash}query`]: 'http://localhost:8000',
+        [`${baseWithSlash}health`]: 'http://localhost:8000',
+        [`${baseWithSlash}documents`]: 'http://localhost:8000',
+        [`${baseWithSlash}upload`]: 'http://localhost:8000',
+        [`${baseWithSlash}config`]: 'http://localhost:8000',
+      }
+    }
   }
 })
