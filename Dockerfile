@@ -6,6 +6,10 @@
 # Using Node 22 (LTS) which is compatible with most modern React builds
 FROM node:22-slim AS ui-build
 
+# Accept BASE_URL_PATH as a build argument (default: /)
+ARG BASE_URL_PATH=/
+ENV BASE_URL_PATH=${BASE_URL_PATH}
+
 WORKDIR /app/ui
 
 # Copy dependency definitions
@@ -59,6 +63,10 @@ ENV PORT=8000
 # Expose the application port
 EXPOSE 8000
 
+# Accept BASE_URL_PATH as a build argument for runtime
+ARG BASE_URL_PATH=/
+ENV BASE_URL_PATH=${BASE_URL_PATH}
+
 # Command to run the application
 # Using uvicorn directly for production performance
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:root_app", "--host", "0.0.0.0", "--port", "8000"]
