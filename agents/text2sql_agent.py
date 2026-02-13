@@ -11,13 +11,17 @@ from models import AgentResult
 import socket
 
 
-TEXT2SQL_SYSTEM_PROMPT = """You are an expert SQL query generator. Your job is to convert natural language questions into valid PostgreSQL queries.
+def get_text2sql_system_prompt(db_type: str) -> str:
+    """Get the appropriate system prompt based on database type."""
+    dialect = "ClickHouse" if db_type.lower() == "clickhouse" else "PostgreSQL"
+    
+    return f"""You are an expert SQL query generator. Your job is to convert natural language questions into valid {dialect} queries.
 
 Database Schema:
-{schema}
+{{schema}}
 
 Rules:
-1. Generate ONLY valid PostgreSQL syntax
+1. Generate ONLY valid {dialect} syntax
 2. Use only the tables and columns shown in the schema
 3. Always use proper JOINs when accessing multiple tables
 4. Use aggregation functions (COUNT, SUM, AVG, etc.) when appropriate
@@ -62,11 +66,14 @@ class Text2SQLAgent:
 
         socket.getaddrinfo = ipv4_only_getaddrinfo
                 
-        # Initialize PostgreSQL database connection
+        # Initialize database connection based on db_type
         self.engine = create_engine(settings.database_url)
         
+        # Get appropriate system prompt based on database type
+        system_prompt = get_text2sql_system_prompt(settings.db_type)
+        
         self.prompt = ChatPromptTemplate.from_messages([
-            ("system", TEXT2SQL_SYSTEM_PROMPT),
+            ("system", system_prompt),
             ("human", TEXT2SQL_USER_PROMPT),
         ])
         
@@ -77,14 +84,21 @@ class Text2SQLAgent:
     def get_schema(self) -> str:
         """
         Get the database schema as a string.
+        Only includes tables specified in settings.table_filter_list.
+        If table_filter_list is empty, includes all tables.
         
         Returns:
             Schema description
         """
         inspector = inspect(self.engine)
         schema_parts = []
+        allowed_tables = settings.allowed_tables
         
         for table_name in inspector.get_table_names():
+            # Skip table if filter is specified and table is not in the list
+            if allowed_tables and table_name not in allowed_tables:
+                continue
+            
             columns = inspector.get_columns(table_name)
             column_defs = []
             for col in columns:

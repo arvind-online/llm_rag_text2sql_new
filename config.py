@@ -31,12 +31,26 @@ class Settings(BaseSettings):
     aws_profile: str = ""
     aws_bearer_token_bedrock: str = ""  # Short-term API key (bearer token)
     
+    # Database Type: "postgres" or "clickhouse"
+    db_type: str = "postgres"
+    
     # PostgreSQL Database Configuration
     pghost: str = "localhost"
     pguser: str = "postgres"
     pgpassword: str = ""
     pgdatabase: str = "postgres"
     pgport: int = 5432
+    
+    # ClickHouse Database Configuration
+    clickhouse_host: str = "localhost"
+    clickhouse_port: int = 8123
+    clickhouse_user: str = "default"
+    clickhouse_password: str = ""
+    clickhouse_database: str = "default"
+    
+    # Table Filtering - comma-separated list of tables to include in schema
+    # Leave empty to include all tables
+    table_filter_list: str = ""
     
     # Vector Store
     chroma_persist_dir: str = "./data/chroma"
@@ -53,11 +67,33 @@ class Settings(BaseSettings):
     show_sql_queries: bool = True  # Set to True to show SQL queries in responses
     
     @property
-    def database_url(self) -> str:
+    def postgres_url(self) -> str:
         """Get PostgreSQL connection URL with URL-encoded password."""
         from urllib.parse import quote_plus
         encoded_password = quote_plus(self.pgpassword)
-        return f"postgresql://postgres.symkcqsvcrtgqmqcsfuq:{encoded_password}@aws-1-ap-northeast-1.pooler.supabase.com:{self.pgport}/{self.pgdatabase}"
+        return f"postgresql://{self.pguser}:{encoded_password}@{self.pghost}:{self.pgport}/{self.pgdatabase}"
+    
+    @property
+    def clickhouse_url(self) -> str:
+        """Get ClickHouse connection URL with URL-encoded password."""
+        from urllib.parse import quote_plus
+        encoded_password = quote_plus(self.clickhouse_password)
+        return f"clickhouse+http://{self.clickhouse_user}:{encoded_password}@{self.clickhouse_host}:{self.clickhouse_port}/{self.clickhouse_database}"
+    
+    @property
+    def database_url(self) -> str:
+        """Get the appropriate database connection URL based on db_type."""
+        if self.db_type.lower() == "clickhouse":
+            return self.clickhouse_url
+        else:
+            return self.postgres_url
+    
+    @property
+    def allowed_tables(self) -> list[str]:
+        """Get list of allowed tables from table_filter_list."""
+        if not self.table_filter_list:
+            return []
+        return [table.strip() for table in self.table_filter_list.split(",") if table.strip()]
     
     @property
     def chroma_persist_dir_resolved(self) -> Path:
