@@ -14,6 +14,16 @@ _sql_agent = None
 _combiner = None
 
 
+def reset_agents():
+    """Reset all lazy-initialized agents and the graph so they pick up new LLM settings."""
+    global _router_agent, _rag_agent, _sql_agent, _combiner, _graph
+    _router_agent = None
+    _rag_agent = None
+    _sql_agent = None
+    _combiner = None
+    _graph = None
+
+
 def get_router_agent():
     """Get or create the router agent (lazy initialization)."""
     global _router_agent

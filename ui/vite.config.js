@@ -21,6 +21,7 @@ export default defineConfig(({ mode }) => {
         [`${baseWithSlash}documents`]: 'http://localhost:8000',
         [`${baseWithSlash}upload`]: 'http://localhost:8000',
         [`${baseWithSlash}config`]: 'http://localhost:8000',
+        [`${baseWithSlash}providers`]: 'http://localhost:8000',
       }
     }
   }
