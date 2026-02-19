@@ -28,8 +28,8 @@ RUN npm run build
 # ---------------------------
 # Stage 2: Backend Runtime
 # ---------------------------
-# Using Python 3.9-slim-bookworm to match user's Python 3.9 and ensure newer SQLite for ChromaDB
-FROM python:3.9-slim-bookworm
+# Using Python 3.10-slim-bookworm to match user's Python 3.9 and ensure newer SQLite for ChromaDB
+FROM python:3.10-slim-bookworm
 
 WORKDIR /app
 

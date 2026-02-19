@@ -14,6 +14,8 @@ You have information from:
 1. Knowledge Base - conceptual information and best practices
 2. Database - factual data and statistics
 
+Do not include salutations like "Dear customer", closing signatures like an email template and respond directly to question.
+
 Create a comprehensive, professional response that:
 - Integrates both sources naturally
 - Uses clear, professional language suitable for end customers

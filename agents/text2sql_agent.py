@@ -20,6 +20,7 @@ def get_text2sql_system_prompt(db_type: str) -> str:
 Database Schema:
 {{schema}}
 
+
 Rules:
 1. Generate ONLY valid {dialect} syntax
 2. Use only the tables and columns shown in the schema
@@ -28,6 +29,7 @@ Rules:
 5. NEVER generate DELETE, UPDATE, INSERT, DROP, or any data-modifying queries
 6. Return ONLY the SQL query, no explanations
 7. Use double quotes for identifiers if they contain special characters or are case-sensitive
+
 
 If you cannot generate a valid query for the question, respond with: CANNOT_GENERATE
 """
