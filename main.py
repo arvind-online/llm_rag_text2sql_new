@@ -8,7 +8,7 @@ import httpx
 import os
 import traceback
 
-from fastapi import FastAPI, HTTPException, UploadFile, File
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from pypdf import PdfReader
@@ -166,10 +166,12 @@ class DocumentResponse(BaseModel):
 
 def extract_text_from_pdf(file_path: Path) -> str:
     """Extract text from PDF file."""
+    print("UPLOAD Module :: Extracting text from PDF file")
     reader = PdfReader(file_path)
     text_parts = []
     for page in reader.pages:
         text_parts.append(page.extract_text())
+        print(".")
     return "\n\n".join(text_parts)
 
 
@@ -190,17 +192,18 @@ async def health_check():
 
 
 @api_app.post("/query", response_model=QueryResponse)
-async def process_query(request: QueryRequest):
+async def process_query(request: QueryRequest, req: Request):
     """
     Process a user query through the LangGraph router.
-    
+
     The router will automatically determine whether to use:
     - RAG (for document/knowledge queries)
     - Text2SQL (for data/database queries)
     - Hybrid (for queries needing both)
     """
     try:
-        result = run_query(request.query, request.context)
+        timezone = req.headers.get("X-Timezone", "UTC")
+        result = run_query(request.query, request.context, request.history, timezone)
         
         if result.get("final_response"):
             return result["final_response"]
@@ -210,6 +213,17 @@ async def process_query(request: QueryRequest):
             raise HTTPException(status_code=500, detail="No response generated")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@api_app.post("/session/clear")
+async def clear_session():
+    """
+    No-op kept for backward compatibility.
+
+    Session history is now managed entirely on the frontend and passed with
+    each request, so there is no server-side state to clear.
+    """
+    return {"success": True, "message": "Session cleared"}
 
 
 @api_app.post("/documents", response_model=DocumentResponse)
@@ -264,6 +278,7 @@ async def upload_document(
     try:
         # Save uploaded file to temporary location
         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_file:
+            print("UPLOAD Module :: Reading file")
             content = await file.read()
             temp_file.write(content)
             temp_path = Path(temp_file.name)
@@ -281,6 +296,7 @@ async def upload_document(
         temp_path.unlink()
         
         if not text.strip():
+            print("Upload doc module:: No text could be extracted from the doc")
             raise HTTPException(status_code=400, detail="No text could be extracted from the document")
         
         # Prepare metadata
@@ -294,8 +310,10 @@ async def upload_document(
         if page_count:
             metadata["pages"] = page_count
         
+        
         # Store in ChromaDB
         rag_agent = get_rag_agent()
+        print("UPLOAD:: Trying to store in Vector Store")
         doc_id = rag_agent.add_document(text, metadata)
         
         return DocumentResponse(

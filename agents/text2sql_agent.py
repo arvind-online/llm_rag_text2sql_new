@@ -7,7 +7,7 @@ from sqlalchemy import create_engine, inspect, text
 from langchain_core.prompts import ChatPromptTemplate
 
 from config import settings, get_llm
-from models import AgentResult
+from models import AgentResult, ConversationTurn
 import socket
 
 
@@ -20,6 +20,8 @@ def get_text2sql_system_prompt(db_type: str) -> str:
 Database Schema:
 {{schema}}
 
+Conversation History:
+{{history}}
 
 Rules:
 1. Generate ONLY valid {dialect} syntax
@@ -29,6 +31,10 @@ Rules:
 5. NEVER generate DELETE, UPDATE, INSERT, DROP, or any data-modifying queries
 6. Return ONLY the SQL query, no explanations
 7. Use double quotes for identifiers if they contain special characters or are case-sensitive
+8. Use the conversation history to understand context for follow-up questions
+9. If the user refers to previous results or uses pronouns like "it", "those", "that", "them", resolve them based on the conversation history
+10. For follow-up queries like "show more details" or "filter those", use the previous SQL context to build upon it
+11. Always use the metric system: distances in kilometers (km), speeds in km/h. the database stores values in metric system only. 
 
 
 If you cannot generate a valid query for the question, respond with: CANNOT_GENERATE
@@ -49,6 +55,8 @@ Provide a concise, professional answer that:
 2. Uses proper formatting (bullet points, numbers, etc. where appropriate)
 3. Is easy to understand for non-technical users
 4. Highlights key insights or patterns if relevant
+5. Always express distances in kilometers (km) and speeds in km/h — never in miles or mph
+6. All timestamps/datetimes in the results are in UTC. Convert and display them in the {timezone} timezone.
 
 Do not mention SQL, databases, or technical details."""
 
@@ -70,7 +78,7 @@ class Text2SQLAgent:
                 
         # Initialize database connection based on db_type
         self.engine = create_engine(settings.database_url)
-        
+
         # Get appropriate system prompt based on database type
         system_prompt = get_text2sql_system_prompt(settings.db_type)
         
@@ -162,8 +170,21 @@ class Text2SQLAgent:
         sql = sql.rstrip(';')
         
         return sql
-    
-    def generate_sql(self, query: str) -> Optional[str]:
+
+    def _format_history(self, history: list[ConversationTurn]) -> str:
+        """Format frontend-supplied conversation history into a context string."""
+        if not history:
+            return "No previous queries in this session."
+        context_parts = []
+        for i, turn in enumerate(history[-5:], 1):
+            entry = f"Query {i}:\n  User asked: \"{turn.user}\""
+            if turn.sql_query:
+                entry += f"\n  SQL executed: {turn.sql_query}"
+            entry += f"\n  Assistant answered: {turn.assistant[:300]}"
+            context_parts.append(entry)
+        return "\n\n".join(context_parts)
+
+    def generate_sql(self, query: str, history: list[ConversationTurn] | None = None) -> Optional[str]:
         """
         Generate SQL from natural language.
         
@@ -174,12 +195,14 @@ class Text2SQLAgent:
             SQL query string or None if generation failed
         """
         schema = self.get_schema()
-        
+        history_str = self._format_history(history or [])
+
         chain = self.prompt | self.llm
-        
+
         try:
             response = chain.invoke({
                 "schema": schema,
+                "history": history_str,
                 "query": query,
             })
             
@@ -209,27 +232,29 @@ class Text2SQLAgent:
             
             return [dict(zip(columns, row)) for row in rows]
     
-    def _format_results_professionally(self, query: str, results: list[dict]) -> str:
+    def _format_results_professionally(self, query: str, results: list[dict], timezone: str = "UTC") -> str:
         """
         Format query results into professional, customer-friendly text.
-        
+
         Args:
             query: Original user query
             results: Query results
-            
+            timezone: IANA timezone name for displaying times
+
         Returns:
             Formatted professional response
         """
         if not results:
             return "No results found for your query."
-        
+
         # Use LLM to format results professionally
         chain = self.formatter_prompt | self.llm
-        
+
         try:
             response = chain.invoke({
                 "query": query,
-                "results": str(results[:20])  # Limit to first 20 for formatting
+                "results": str(results[:20]),  # Limit to first 20 for formatting
+                "timezone": timezone,
             })
             return response.content
         except Exception:
@@ -240,7 +265,7 @@ class Text2SQLAgent:
             else:
                 return f"Found {len(results)} result(s) matching your query."
     
-    def query(self, query: str) -> AgentResult:
+    def query(self, query: str, history: list[ConversationTurn] | None = None, timezone: str = "UTC") -> AgentResult:
         """
         Convert natural language to SQL, execute, and return results.
         
@@ -251,7 +276,7 @@ class Text2SQLAgent:
             AgentResult with the query results
         """
         # Generate SQL
-        sql = self.generate_sql(query)
+        sql = self.generate_sql(query, history)
         
         if not sql:
             return AgentResult(
@@ -273,9 +298,9 @@ class Text2SQLAgent:
         # Execute query
         try:
             results = self.execute_sql(sql)
-            
+
             # Format results professionally
-            content = self._format_results_professionally(query, results)
+            content = self._format_results_professionally(query, results, timezone)
             
             # Prepare metadata
             metadata = {

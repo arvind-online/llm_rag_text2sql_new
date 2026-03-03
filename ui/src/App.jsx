@@ -263,6 +263,11 @@ function App() {
     }
   }
 
+  const handleClearSession = () => {
+    setMessages([])
+    showToast('New session started', 'success')
+  }
+
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!query.trim() || isLoading) return
@@ -276,13 +281,26 @@ function App() {
     setQuery('')
     setIsLoading(true)
 
+    // Build conversation history (last 5 user+assistant pairs) to send with the request
+    const history = []
+    for (let i = 0; i < messages.length - 1 && history.length < 5; i++) {
+      if (messages[i].type === 'user' && messages[i + 1].type === 'assistant') {
+        history.push({
+          user: messages[i].content,
+          assistant: messages[i + 1].content,
+          sql_query: messages[i + 1].sql_query || null,
+        })
+      }
+    }
+
     try {
       const response = await fetch(`${API_BASE}query`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'X-Timezone': Intl.DateTimeFormat().resolvedOptions().timeZone,
         },
-        body: JSON.stringify({ query: query }),
+        body: JSON.stringify({ query: query, history }),
         signal: controller.signal,
       })
 
@@ -512,8 +530,22 @@ function App() {
 
       <main className="main">
         <header className="header">
-          <h1>AI Query Assistant</h1>
-          <p>Ask anything about your documents or data</p>
+          <div className="header-content">
+            <div>
+              <h1>AI Query Assistant</h1>
+              <p>Ask anything about your documents or data</p>
+            </div>
+            {messages.length > 0 && (
+              <button
+                className="new-session-btn"
+                onClick={handleClearSession}
+                title="Clear conversation and start a new session"
+                disabled={isLoading}
+              >
+                + New Session
+              </button>
+            )}
+          </div>
         </header>
 
         <div className="messages-container">

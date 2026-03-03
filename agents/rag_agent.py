@@ -72,7 +72,7 @@ class RAGAgent:
         """
         import uuid
         doc_id = str(uuid.uuid4())
-        
+        print("VECTPR STORE:: Add document to vector store")
         embedding = self.embedder.encode(content).tolist()
         
         self.collection.add(
@@ -81,7 +81,7 @@ class RAGAgent:
             documents=[content],
             metadatas=[metadata or {}]
         )
-        
+        print("VECTPR STORE:: Added document with id: ",doc_id)
         return doc_id
     
     def retrieve(self, query: str, n_results: int = 3) -> list[dict]:

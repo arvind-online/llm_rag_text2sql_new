@@ -78,7 +78,7 @@ def execute_rag(state: GraphState) -> GraphState:
 
 def execute_sql(state: GraphState) -> GraphState:
     """SQL agent node: convert to SQL and query database."""
-    result = get_sql_agent().query(state.query)
+    result = get_sql_agent().query(state.query, state.history, state.timezone)
     state_dict = state.model_dump()
     state_dict["sql_result"] = result
     return GraphState(**state_dict)
@@ -87,7 +87,7 @@ def execute_sql(state: GraphState) -> GraphState:
 def execute_both(state: GraphState) -> GraphState:
     """Execute both RAG and SQL agents for hybrid queries."""
     rag_result = get_rag_agent().query(state.query)
-    sql_result = get_sql_agent().query(state.query)
+    sql_result = get_sql_agent().query(state.query, state.history, state.timezone)
     state_dict = state.model_dump()
     state_dict["rag_result"] = rag_result
     state_dict["sql_result"] = sql_result
@@ -185,18 +185,20 @@ def get_graph():
     return _graph
 
 
-def run_query(query: str, context: Optional[str] = None) -> GraphState:
+def run_query(query: str, context: Optional[str] = None, history: list = None, timezone: str = "UTC") -> GraphState:
     """
     Run a query through the LangGraph workflow.
-    
+
     Args:
         query: User's natural language query
         context: Optional additional context
-        
+        history: Conversation history from the frontend (list of ConversationTurn)
+        timezone: IANA timezone name for displaying times (e.g. 'America/New_York')
+
     Returns:
         Final GraphState with results
     """
-    initial_state = GraphState(query=query, context=context)
+    initial_state = GraphState(query=query, context=context, history=history or [], timezone=timezone)
     
     # Run the graph
     result = get_graph().invoke(initial_state)

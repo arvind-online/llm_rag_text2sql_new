@@ -1,5 +1,6 @@
 """Pydantic models for request/response schemas and internal state."""
 
+from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
 
@@ -13,10 +14,27 @@ class RouteType(str, Enum):
     HYBRID = "hybrid"
 
 
+@dataclass
+class QueryContext:
+    """Context from a previous SQL query for conversation memory."""
+    user_query: str
+    generated_sql: str
+    result_summary: str
+    timestamp: float
+
+
+class ConversationTurn(BaseModel):
+    """A single conversation turn passed from the frontend."""
+    user: str = Field(..., description="The user's query text")
+    assistant: str = Field(..., description="The assistant's response text")
+    sql_query: Optional[str] = Field(None, description="SQL query from that turn, if any")
+
+
 class QueryRequest(BaseModel):
     """User query request."""
     query: str = Field(..., description="The user's natural language query")
     context: Optional[str] = Field(None, description="Optional additional context")
+    history: list[ConversationTurn] = Field(default_factory=list, description="Recent conversation turns (up to 5)")
 
 
 class QueryResponse(BaseModel):
@@ -52,6 +70,8 @@ class GraphState(BaseModel):
     """State passed through the LangGraph workflow."""
     query: str = Field(..., description="Original user query")
     context: Optional[str] = Field(None, description="Optional context")
+    history: list[ConversationTurn] = Field(default_factory=list, description="Conversation history from frontend")
+    timezone: str = Field(default="UTC", description="IANA timezone for displaying times (e.g. 'America/New_York')")
     route_decision: Optional[RouteDecision] = Field(None, description="Router's decision")
     rag_result: Optional[AgentResult] = Field(None, description="RAG agent result")
     sql_result: Optional[AgentResult] = Field(None, description="Text2SQL agent result")
