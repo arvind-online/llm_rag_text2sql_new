@@ -314,6 +314,7 @@ function App() {
           sources: data.sources,
           sql_query: data.sql_query,
           sql_results: data.sql_results,
+          model_used: data.model_used,
         }
         setMessages(prev => [...prev, assistantMessage])
       } else {
@@ -597,6 +598,12 @@ function App() {
                           <div className="sql-section">
                             <div className="sql-label">SQL Query:</div>
                             <code className="sql-code">{msg.sql_query}</code>
+                          </div>
+                        )}
+                        {msg.model_used && (
+                          <div className="model-used">
+                            <span className="model-used-label">Model:</span>
+                            <span className="model-used-tag">{msg.model_used}</span>
                           </div>
                         )}
                         {msg.sources && msg.sources.length > 0 && (

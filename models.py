@@ -44,6 +44,7 @@ class QueryResponse(BaseModel):
     sources: list[str] = Field(default_factory=list, description="Source references")
     sql_query: Optional[str] = Field(None, description="SQL query if applicable")
     sql_results: Optional[list[dict[str, Any]]] = Field(None, description="SQL results if applicable")
+    model_used: Optional[str] = Field(None, description="LLM provider/model used to generate the response")
 
 
 class RouteDecision(BaseModel):

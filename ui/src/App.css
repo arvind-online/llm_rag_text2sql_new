@@ -668,6 +668,28 @@ body {
   overflow-x: auto;
 }
 
+.model-used {
+  margin-top: 0.75rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.model-used-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.model-used-tag {
+  background: var(--bg-secondary);
+  padding: 0.25rem 0.625rem;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+  font-family: 'Fira Code', 'Monaco', monospace;
+}
+
 .sources {
   margin-top: 1rem;
   display: flex;

@@ -82,7 +82,8 @@ class ResultCombiner:
                 route_taken=route,
                 sources=sql_result.sources,
                 sql_query=sql_result.metadata.get("sql") if settings.show_sql_queries else None,
-                sql_results=sql_result.metadata.get("results")
+                sql_results=sql_result.metadata.get("results"),
+                model_used=sql_result.metadata.get("model_used"),
             )
         
         # Hybrid - combine both results
@@ -104,7 +105,8 @@ class ResultCombiner:
                     route_taken=route,
                     sources=all_sources,
                     sql_query=sql_result.metadata.get("sql") if settings.show_sql_queries else None,
-                    sql_results=sql_result.metadata.get("results")
+                    sql_results=sql_result.metadata.get("results"),
+                    model_used=sql_result.metadata.get("model_used"),
                 )
             except Exception as e:
                 # Fallback: concatenate results
@@ -114,7 +116,8 @@ class ResultCombiner:
                     route_taken=route,
                     sources=rag_result.sources + sql_result.sources,
                     sql_query=sql_result.metadata.get("sql") if settings.show_sql_queries else None,
-                    sql_results=sql_result.metadata.get("results")
+                    sql_results=sql_result.metadata.get("results"),
+                    model_used=sql_result.metadata.get("model_used"),
                 )
         
         # Fallback for edge cases

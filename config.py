@@ -66,6 +66,7 @@ class Settings(BaseSettings):
     
     # Debug Settings
     show_sql_queries: bool = True  # Set to True to show SQL queries in responses
+    show_model_name: bool = True   # Set to True to show the model used below the SQL query
     
     @property
     def postgres_url(self) -> str:

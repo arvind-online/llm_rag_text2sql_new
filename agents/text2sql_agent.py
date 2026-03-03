@@ -1,13 +1,19 @@
 """Text2SQL agent for natural language to SQL conversion."""
 
+import json
+import logging
 import re
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 from sqlalchemy import create_engine, inspect, text
+from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_core.prompts import ChatPromptTemplate
 
 from config import settings, get_llm
 from models import AgentResult, ConversationTurn
+from agents.timezone_converter import convert_utc_to_timezone
 import socket
 
 
@@ -50,13 +56,34 @@ Original Question: {query}
 
 Query Results: {results}
 
+User's Timezone: {timezone}
+
+If the query results contain any datetime, timestamp, or time values (all database times are stored in UTC), you MUST call the `convert_utc_to_timezone` tool first — passing the results as a JSON array and target_timezone="{timezone}" — before writing the final response. This ensures times are displayed accurately.
+
+After converting (or if no datetime values are present), provide a concise, professional answer that:
+1. Directly answers the question in natural language
+2. Uses proper formatting (bullet points, numbers, etc. where appropriate)
+3. Is easy to understand for non-technical users
+4. Highlights key insights or patterns if relevant
+5. Always express distances in kilometers (km) and speeds in km/h — never in miles or mph
+6. Display all times using the converted values in {timezone}
+
+Do not mention SQL, databases, or technical details."""
+
+# Plain version used when tool calling is not available — datetimes are pre-converted in Python
+RESULT_FORMATTER_PROMPT_PLAIN = """You are a professional data analyst. Format the following database query results into a clear, professional response for an end customer.
+
+Original Question: {query}
+
+Query Results: {results}
+
 Provide a concise, professional answer that:
 1. Directly answers the question in natural language
 2. Uses proper formatting (bullet points, numbers, etc. where appropriate)
 3. Is easy to understand for non-technical users
 4. Highlights key insights or patterns if relevant
 5. Always express distances in kilometers (km) and speeds in km/h — never in miles or mph
-6. All timestamps/datetimes in the results are in UTC. Convert and display them in the {timezone} timezone.
+6. All datetime values in the results are already in the user's local timezone ({timezone}) — display them as-is
 
 Do not mention SQL, databases, or technical details."""
 
@@ -85,10 +112,6 @@ class Text2SQLAgent:
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", system_prompt),
             ("human", TEXT2SQL_USER_PROMPT),
-        ])
-        
-        self.formatter_prompt = ChatPromptTemplate.from_messages([
-            ("human", RESULT_FORMATTER_PROMPT),
         ])
     
     def get_schema(self) -> str:
@@ -194,6 +217,14 @@ class Text2SQLAgent:
         Returns:
             SQL query string or None if generation failed
         """
+        provider = settings.llm_provider.lower()
+        if provider == "ollama":
+            model_name = settings.ollama_model
+        elif provider == "bedrock":
+            model_name = settings.bedrock_model_id
+        else:
+            model_name = settings.llm_model
+        logger.info("SQL generation using provider=%s model=%s", provider, model_name)
         schema = self.get_schema()
         history_str = self._format_history(history or [])
 
@@ -236,6 +267,10 @@ class Text2SQLAgent:
         """
         Format query results into professional, customer-friendly text.
 
+        The formatter LLM may call the convert_utc_to_timezone tool when it detects
+        datetime/timestamp values in the results, converting them accurately before
+        producing the final response.
+
         Args:
             query: Original user query
             results: Query results
@@ -247,18 +282,76 @@ class Text2SQLAgent:
         if not results:
             return "No results found for your query."
 
-        # Use LLM to format results professionally
-        chain = self.formatter_prompt | self.llm
+        results_json = json.dumps(results[:20], default=str)
+        prompt_text = (
+            RESULT_FORMATTER_PROMPT
+            .replace("{query}", query)
+            .replace("{results}", results_json)
+            .replace("{timezone}", timezone)
+        )
+        messages = [HumanMessage(content=prompt_text)]
 
+        # --- Tool-calling path ---
         try:
-            response = chain.invoke({
-                "query": query,
-                "results": str(results[:20]),  # Limit to first 20 for formatting
-                "timezone": timezone,
-            })
+            formatter_llm = self.llm.bind_tools([convert_utc_to_timezone])
+
+            # Agent loop: allow the LLM up to 3 turns so it can call the tool and
+            # then produce its final formatted response.
+            for _ in range(3):
+                response = formatter_llm.invoke(messages)
+
+                tool_calls = getattr(response, "tool_calls", None)
+                if not tool_calls:
+                    # No tool call — this is the final formatted answer
+                    return response.content
+
+                # Execute each requested tool call and feed results back
+                messages.append(response)
+                for tool_call in tool_calls:
+                    tool_result = convert_utc_to_timezone.invoke(tool_call["args"])
+                    messages.append(
+                        ToolMessage(content=str(tool_result), tool_call_id=tool_call["id"])
+                    )
+
+            # Loop exhausted — return last response
             return response.content
+
+        except Exception as tool_err:
+            logger.warning(
+                "Tool-calling formatter failed (%s: %s); falling back to plain LLM call.",
+                type(tool_err).__name__, tool_err,
+            )
+
+        # --- Plain fallback: pre-convert datetimes in Python, then call LLM without tools ---
+        try:
+            from agents.timezone_converter import _convert_value
+            from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+            try:
+                target_tz = ZoneInfo(timezone)
+            except (ZoneInfoNotFoundError, KeyError):
+                target_tz = ZoneInfo("UTC")
+
+            pre_converted = [
+                {k: _convert_value(v, target_tz) for k, v in row.items()}
+                if isinstance(row, dict) else row
+                for row in results[:20]
+            ]
+            fallback_results_json = json.dumps(pre_converted, default=str)
         except Exception:
-            # Fallback to simple formatting
+            fallback_results_json = json.dumps(results[:20], default=str)
+
+        fallback_prompt = (
+            RESULT_FORMATTER_PROMPT_PLAIN
+            .replace("{query}", query)
+            .replace("{results}", fallback_results_json)
+            .replace("{timezone}", timezone)
+        )
+        try:
+            response = self.llm.invoke([HumanMessage(content=fallback_prompt)])
+            content = response.content if isinstance(response.content, str) else str(response.content)
+            return content or f"Found {len(results)} result(s) matching your query."
+        except Exception as fallback_err:
+            logger.warning("Plain LLM fallback also failed (%s: %s).", type(fallback_err).__name__, fallback_err)
             if len(results) == 1 and len(results[0]) == 1:
                 key, value = list(results[0].items())[0]
                 return f"The answer is: **{value}**"
@@ -301,6 +394,8 @@ class Text2SQLAgent:
 
             # Format results professionally
             content = self._format_results_professionally(query, results, timezone)
+            if not isinstance(content, str) or not content:
+                content = f"Found {len(results)} result(s) matching your query."
             
             # Prepare metadata
             metadata = {
@@ -311,6 +406,17 @@ class Text2SQLAgent:
             # Only include SQL query if debugging is enabled
             if settings.show_sql_queries:
                 metadata["sql"] = sql
+
+            # Include model name if enabled
+            if settings.show_model_name:
+                provider = settings.llm_provider.lower()
+                if provider == "ollama":
+                    _model = settings.ollama_model
+                elif provider == "bedrock":
+                    _model = settings.bedrock_model_id
+                else:
+                    _model = settings.llm_model
+                metadata["model_used"] = f"{provider} / {_model}"
             
             return AgentResult(
                 agent_type="sql",
@@ -319,9 +425,10 @@ class Text2SQLAgent:
                 metadata=metadata
             )
         except Exception as e:
+            logger.error("Query execution failed: %s", e, exc_info=True)
             return AgentResult(
                 agent_type="sql",
-                content=f"An error occurred while processing your query. Please try again.",
+                content="An error occurred while processing your query. Please try again.",
                 sources=[],
                 metadata={"error": str(e), "sql": sql if settings.show_sql_queries else None}
             )

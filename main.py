@@ -346,6 +346,7 @@ async def get_config():
         "embedding_model": settings.embedding_model,
         "chroma_collection": settings.chroma_collection_name,
         "debug_mode": settings.show_sql_queries,
+        "show_model_name": settings.show_model_name,
     }
 
 
