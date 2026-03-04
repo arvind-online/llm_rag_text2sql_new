@@ -40,7 +40,8 @@ Rules:
 8. Use the conversation history to understand context for follow-up questions
 9. If the user refers to previous results or uses pronouns like "it", "those", "that", "them", resolve them based on the conversation history
 10. For follow-up queries like "show more details" or "filter those", use the previous SQL context to build upon it
-11. Always use the metric system: distances in kilometers (km), speeds in km/h. the database stores values in metric system only. 
+11. Always use the metric system: distances in kilometers (km), speeds in km/h. the database stores values in metric system only.
+12. Always wrap string/text values in single quotes in WHERE clauses (e.g., WHERE vin = 'MA1KU2EDBR3E60602', NOT WHERE vin = MA1KU2EDBR3E60602).
 
 
 If you cannot generate a valid query for the question, respond with: CANNOT_GENERATE
@@ -174,13 +175,22 @@ class Text2SQLAgent:
         
         return True
     
+    # SQL keywords that should never be quoted as string values
+    _SQL_KEYWORDS = {
+        'NULL', 'TRUE', 'FALSE', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN',
+        'IS', 'EXISTS', 'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'SELECT', 'FROM',
+        'WHERE', 'ORDER', 'GROUP', 'HAVING', 'LIMIT', 'OFFSET', 'JOIN', 'ON',
+        'CURRENT_TIMESTAMP', 'NOW', 'TODAY', 'ASC', 'DESC', 'UNION', 'EXCEPT',
+        'INTERSECT', 'AS', 'BY', 'DISTINCT', 'ALL', 'ANY', 'SOME',
+    }
+
     def _clean_sql(self, sql: str) -> str:
         """
         Clean the generated SQL query.
-        
+
         Args:
             sql: Raw SQL from LLM
-            
+
         Returns:
             Cleaned SQL query
         """
@@ -188,10 +198,30 @@ class Text2SQLAgent:
         sql = re.sub(r'```sql\s*', '', sql)
         sql = re.sub(r'```\s*', '', sql)
         sql = sql.strip()
-        
+
         # Remove trailing semicolons
         sql = sql.rstrip(';')
-        
+
+        # Fix unquoted string values after comparison operators.
+        # Matches values that contain both letters AND digits (e.g. VIN MA1KU2EDBR3E60602)
+        # and are clearly not column references (not followed by a dot).
+        # Lookahead ensures we're at the end of a condition, not in the middle of a col reference.
+        def _maybe_quote(m: re.Match) -> str:
+            op, value = m.group(1), m.group(2)
+            if value.upper() in self._SQL_KEYWORDS:
+                return m.group(0)
+            # Quote only if the value mixes letters and digits (VIN-like identifiers)
+            if any(c.isalpha() for c in value) and any(c.isdigit() for c in value):
+                return f"{op}'{value}'"
+            return m.group(0)
+
+        sql = re.sub(
+            r'((?:=|!=|<>)\s*)([A-Za-z][A-Za-z0-9_]*)(?=\s+(?:AND|OR|ORDER|GROUP|HAVING|LIMIT|UNION|EXCEPT|INTERSECT)\b|\s*\)|\s*$)',
+            _maybe_quote,
+            sql,
+            flags=re.IGNORECASE,
+        )
+
         return sql
 
     def _format_history(self, history: list[ConversationTurn]) -> str:
